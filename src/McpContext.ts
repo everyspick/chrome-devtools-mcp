@@ -778,6 +778,55 @@ export class McpContext implements Context {
 
     const rootNodeWithId = assignIds(rootNode);
 
+    await this.#insertExtraNodes(
+      page,
+      idToNode,
+      seenUniqueIds,
+      snapshotId,
+      idCounter,
+      rootNodeWithId,
+      extraHandles,
+    );
+
+    const snapshot: TextSnapshot = {
+      root: rootNodeWithId,
+      snapshotId: String(snapshotId),
+      idToNode,
+      hasSelectedElement: false,
+      verbose,
+    };
+    page.setSnapshot(snapshot);
+    const data = devtoolsData ?? (await this.getDevToolsData(page));
+    if (data?.cdpBackendNodeId) {
+      snapshot.hasSelectedElement = true;
+      snapshot.selectedElementUid = this.resolveCdpElementId(
+        page,
+        data?.cdpBackendNodeId,
+      );
+    }
+
+    // Clean up unique IDs that we did not see anymore.
+    for (const key of uniqueBackendNodeIdToMcpId.keys()) {
+      if (!seenUniqueIds.has(key)) {
+        uniqueBackendNodeIdToMcpId.delete(key);
+      }
+    }
+  }
+
+  // ExtraHandles represent DOM nodes which are not part of the accessibility tree, e.g. DOM nodes
+  // returned by in-page tools. We insert them into the tree by finding the closest ancestor in the
+  // tree and inserting the node as a child. The ancestor's child nodes are re-parented if necessary.
+  async #insertExtraNodes(
+    page: ContextPage,
+    idToNode: Map<string, TextSnapshotNode>,
+    seenUniqueIds: Set<string>,
+    snapshotId: number,
+    idCounter: number,
+    rootNodeWithId: TextSnapshotNode,
+    extraHandles?: ElementHandle[],
+  ): Promise<void> {
+    const {uniqueBackendNodeIdToMcpId} = page;
+
     const createExtraNode = async (
       handle: ElementHandle,
     ): Promise<TextSnapshotNode | null> => {
@@ -791,8 +840,9 @@ export class McpContext implements Context {
       }
 
       let id = '';
-      if (uniqueBackendNodeIdToMcpId.has(uniqueBackendId)) {
-        id = uniqueBackendNodeIdToMcpId.get(uniqueBackendId)!;
+      const mcpId = uniqueBackendNodeIdToMcpId.get(uniqueBackendId);
+      if (mcpId !== undefined) {
+        id = mcpId;
       } else {
         id = `${snapshotId}_${idCounter++}`;
         uniqueBackendNodeIdToMcpId.set(uniqueBackendId, id);
@@ -917,32 +967,10 @@ export class McpContext implements Context {
       }
       idToNode.set(extraNode.id, extraNode);
       const attachTarget = (await findAncestorNode(handle)) || rootNodeWithId;
-      const descendantIds = await findDescendantNodes(extraNode.backendNodeId!);
-      const index = moveChildNodes(attachTarget, extraNode, descendantIds);
-      attachTarget.children.splice(index, 0, extraNode);
-    }
-
-    const snapshot: TextSnapshot = {
-      root: rootNodeWithId,
-      snapshotId: String(snapshotId),
-      idToNode,
-      hasSelectedElement: false,
-      verbose,
-    };
-    page.setSnapshot(snapshot);
-    const data = devtoolsData ?? (await this.getDevToolsData(page));
-    if (data?.cdpBackendNodeId) {
-      snapshot.hasSelectedElement = true;
-      snapshot.selectedElementUid = this.resolveCdpElementId(
-        page,
-        data?.cdpBackendNodeId,
-      );
-    }
-
-    // Clean up unique IDs that we did not see anymore.
-    for (const key of uniqueBackendNodeIdToMcpId.keys()) {
-      if (!seenUniqueIds.has(key)) {
-        uniqueBackendNodeIdToMcpId.delete(key);
+      if (extraNode.backendNodeId !== undefined) {
+        const descendantIds = await findDescendantNodes(extraNode.backendNodeId);
+        const index = moveChildNodes(attachTarget, extraNode, descendantIds);
+        attachTarget.children.splice(index, 0, extraNode);
       }
     }
   }
