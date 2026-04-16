@@ -968,7 +968,9 @@ export class McpContext implements Context {
       idToNode.set(extraNode.id, extraNode);
       const attachTarget = (await findAncestorNode(handle)) || rootNodeWithId;
       if (extraNode.backendNodeId !== undefined) {
-        const descendantIds = await findDescendantNodes(extraNode.backendNodeId);
+        const descendantIds = await findDescendantNodes(
+          extraNode.backendNodeId,
+        );
         const index = moveChildNodes(attachTarget, extraNode, descendantIds);
         attachTarget.children.splice(index, 0, extraNode);
       }
