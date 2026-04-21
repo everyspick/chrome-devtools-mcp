@@ -54,5 +54,5 @@
     "README.md",
     "LICENSE"
   ],
-  "private": false
+  "private": true
 }
