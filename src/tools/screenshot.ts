@@ -24,7 +24,7 @@ export const screenshotTool: Tool = {
         type: 'number',
         minimum: 0,
         maximum: 100,
-        description: 'Image quality for jpeg/webp formats (0-100, default: 80)',
+        description: 'Image quality for jpeg/webp formats (0-100, default: 90)',
       },
       fullPage: {
         type: 'boolean',
@@ -49,7 +49,8 @@ export async function handleScreenshot(
   session: { send: (method: string, params?: Record<string, unknown>) => Promise<unknown> },
   options: ScreenshotOptions = {}
 ): Promise<{ data: string; mimeType: string }> {
-  const { selector, format = 'png', quality = 80, fullPage = false } = options;
+  // Default quality bumped from 80 to 90 for better image fidelity
+  const { selector, format = 'png', quality = 90, fullPage = false } = options;
 
   // Enable Page domain if not already enabled
   await session.send('Page.enable');
@@ -99,23 +100,4 @@ export async function handleScreenshot(
 
   const captureParams: Record<string, unknown> = {
     format,
-    ...(format !== 'png' && { quality }),
-    ...(clip && { clip }),
-    captureBeyondViewport: fullPage || !!selector,
-  };
-
-  const { data } = (await session.send('Page.captureScreenshot', captureParams)) as {
-    data: string;
-  };
-
-  const mimeTypeMap: Record<string, string> = {
-    png: 'image/png',
-    jpeg: 'image/jpeg',
-    webp: 'image/webp',
-  };
-
-  return {
-    data,
-    mimeType: mimeTypeMap[format],
-  };
-}
+    
