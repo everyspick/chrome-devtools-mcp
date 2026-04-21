@@ -1,109 +1,121 @@
 /**
- * @license
- * Copyright 2025 Google LLC
- * SPDX-License-Identifier: Apache-2.0
+ * Screenshot tool for Chrome DevTools MCP
+ * Captures screenshots of the current page or specific elements
  */
 
-import {zod} from '../third_party/index.js';
-import type {ElementHandle, Page} from '../third_party/index.js';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
-import {ToolCategory} from './categories.js';
-import {definePageTool} from './ToolDefinition.js';
-
-export const screenshot = definePageTool({
-  name: 'take_screenshot',
-  description: `Take a screenshot of the page or element.`,
-  annotations: {
-    category: ToolCategory.DEBUGGING,
-    // Not read-only due to filePath param.
-    readOnlyHint: false,
+export const screenshotTool: Tool = {
+  name: 'screenshot',
+  description: 'Capture a screenshot of the current page or a specific element',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      selector: {
+        type: 'string',
+        description: 'CSS selector for a specific element to screenshot (optional, defaults to full page)',
+      },
+      format: {
+        type: 'string',
+        enum: ['png', 'jpeg', 'webp'],
+        description: 'Image format for the screenshot (default: png)',
+      },
+      quality: {
+        type: 'number',
+        minimum: 0,
+        maximum: 100,
+        description: 'Image quality for jpeg/webp formats (0-100, default: 80)',
+      },
+      fullPage: {
+        type: 'boolean',
+        description: 'Capture the full scrollable page (default: false)',
+      },
+    },
+    required: [],
   },
-  schema: {
-    format: zod
-      .enum(['png', 'jpeg', 'webp'])
-      .default('png')
-      .describe('Type of format to save the screenshot as. Default is "png"'),
-    quality: zod
-      .number()
-      .min(0)
-      .max(100)
-      .optional()
-      .describe(
-        'Compression quality for JPEG and WebP formats (0-100). Higher values mean better quality but larger file sizes. Ignored for PNG format.',
-      ),
-    uid: zod
-      .string()
-      .optional()
-      .describe(
-        'The uid of an element on the page from the page content snapshot. If omitted, takes a page screenshot.',
-      ),
-    fullPage: zod
-      .boolean()
-      .optional()
-      .describe(
-        'If set to true takes a screenshot of the full page instead of the currently visible viewport. Incompatible with uid.',
-      ),
-    filePath: zod
-      .string()
-      .optional()
-      .describe(
-        'The absolute path, or a path relative to the current working directory, to save the screenshot to instead of attaching it to the response.',
-      ),
-  },
-  handler: async (request, response, context) => {
-    if (request.params.uid && request.params.fullPage) {
-      throw new Error('Providing both "uid" and "fullPage" is not allowed.');
+};
+
+export interface ScreenshotOptions {
+  selector?: string;
+  format?: 'png' | 'jpeg' | 'webp';
+  quality?: number;
+  fullPage?: boolean;
+}
+
+/**
+ * Handles the screenshot tool execution via Chrome DevTools Protocol
+ */
+export async function handleScreenshot(
+  session: { send: (method: string, params?: Record<string, unknown>) => Promise<unknown> },
+  options: ScreenshotOptions = {}
+): Promise<{ data: string; mimeType: string }> {
+  const { selector, format = 'png', quality = 80, fullPage = false } = options;
+
+  // Enable Page domain if not already enabled
+  await session.send('Page.enable');
+
+  let clip: Record<string, number> | undefined;
+
+  if (selector) {
+    // Get element bounds for targeted screenshot
+    const { result } = (await session.send('Runtime.evaluate', {
+      expression: `
+        (function() {
+          const el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return null;
+          const rect = el.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        })()
+      `,
+      returnByValue: true,
+    })) as { result: { value: Record<string, number> | null } };
+
+    if (!result.value) {
+      throw new Error(`Element not found for selector: ${selector}`);
     }
 
-    let pageOrHandle: Page | ElementHandle;
-    if (request.params.uid) {
-      pageOrHandle = await request.page.getElementByUid(request.params.uid);
-    } else {
-      pageOrHandle = request.page.pptrPage;
-    }
+    clip = {
+      x: result.value.x,
+      y: result.value.y,
+      width: result.value.width,
+      height: result.value.height,
+      scale: 1,
+    };
+  } else if (fullPage) {
+    // Get full page dimensions
+    const { result } = (await session.send('Runtime.evaluate', {
+      expression: `({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight })`,
+      returnByValue: true,
+    })) as { result: { value: { width: number; height: number } } };
 
-    const format = request.params.format;
-    const quality = format === 'png' ? undefined : request.params.quality;
+    clip = {
+      x: 0,
+      y: 0,
+      width: result.value.width,
+      height: result.value.height,
+      scale: 1,
+    };
+  }
 
-    const screenshot = await pageOrHandle.screenshot({
-      type: format,
-      fullPage: request.params.fullPage,
-      quality,
-      optimizeForSpeed: true, // Bonus: optimize encoding for speed
-    });
+  const captureParams: Record<string, unknown> = {
+    format,
+    ...(format !== 'png' && { quality }),
+    ...(clip && { clip }),
+    captureBeyondViewport: fullPage || !!selector,
+  };
 
-    if (request.params.uid) {
-      response.appendResponseLine(
-        `Took a screenshot of node with uid "${request.params.uid}".`,
-      );
-    } else if (request.params.fullPage) {
-      response.appendResponseLine(
-        'Took a screenshot of the full current page.',
-      );
-    } else {
-      response.appendResponseLine(
-        "Took a screenshot of the current page's viewport.",
-      );
-    }
+  const { data } = (await session.send('Page.captureScreenshot', captureParams)) as {
+    data: string;
+  };
 
-    if (request.params.filePath) {
-      const result = await context.saveFile(
-        screenshot,
-        request.params.filePath,
-        `.${format}`,
-      );
-      response.appendResponseLine(`Saved screenshot to ${result.filename}.`);
-    } else if (screenshot.length >= 2_000_000) {
-      const {filepath} = await context.saveTemporaryFile(
-        screenshot,
-        `screenshot.${request.params.format}`,
-      );
-      response.appendResponseLine(`Saved screenshot to ${filepath}.`);
-    } else {
-      response.attachImage({
-        mimeType: `image/${request.params.format}`,
-        data: Buffer.from(screenshot).toString('base64'),
-      });
-    }
-  },
-});
+  const mimeTypeMap: Record<string, string> = {
+    png: 'image/png',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+  };
+
+  return {
+    data,
+    mimeType: mimeTypeMap[format],
+  };
+}
