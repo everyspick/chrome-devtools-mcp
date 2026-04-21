@@ -1,106 +1,134 @@
 /**
- * @license
- * Copyright 2025 Google LLC
- * SPDX-License-Identifier: Apache-2.0
+ * Console tool for Chrome DevTools MCP
+ * Captures console messages and evaluates JavaScript expressions in the browser context
  */
 
-import {zod} from '../third_party/index.js';
-import type {ConsoleMessageType} from '../third_party/index.js';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { Page } from 'puppeteer-core';
 
-import {ToolCategory} from './categories.js';
-import {definePageTool} from './ToolDefinition.js';
-type ConsoleResponseType = ConsoleMessageType | 'issue';
-
-const FILTERABLE_MESSAGE_TYPES: [
-  ConsoleResponseType,
-  ...ConsoleResponseType[],
-] = [
-  'log',
-  'debug',
-  'info',
-  'error',
-  'warn',
-  'dir',
-  'dirxml',
-  'table',
-  'trace',
-  'clear',
-  'startGroup',
-  'startGroupCollapsed',
-  'endGroup',
-  'assert',
-  'profile',
-  'profileEnd',
-  'count',
-  'timeEnd',
-  'verbose',
-  'issue',
-];
-
-export const listConsoleMessages = definePageTool({
-  name: 'list_console_messages',
+export const consoleToolDefinition: Tool = {
+  name: 'console',
   description:
-    'List all console messages for the currently selected page since the last navigation.',
-  annotations: {
-    category: ToolCategory.DEBUGGING,
-    readOnlyHint: true,
+    'Evaluate JavaScript in the browser console and retrieve console output. ' +
+    'Returns the result of the expression and any console messages logged during evaluation.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      expression: {
+        type: 'string',
+        description: 'JavaScript expression to evaluate in the browser context',
+      },
+      awaitPromise: {
+        type: 'boolean',
+        description: 'Whether to await the result if it is a Promise (default: true)',
+        default: true,
+      },
+    },
+    required: ['expression'],
   },
-  schema: {
-    pageSize: zod
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe(
-        'Maximum number of messages to return. When omitted, returns all messages.',
-      ),
-    pageIdx: zod
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe(
-        'Page number to return (0-based). When omitted, returns the first page.',
-      ),
-    types: zod
-      .array(zod.enum(FILTERABLE_MESSAGE_TYPES))
-      .optional()
-      .describe(
-        'Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages.',
-      ),
-    includePreservedMessages: zod
-      .boolean()
-      .default(false)
-      .optional()
-      .describe(
-        'Set to true to return the preserved messages over the last 3 navigations.',
-      ),
-  },
-  handler: async (request, response) => {
-    response.setIncludeConsoleData(true, {
-      pageSize: request.params.pageSize,
-      pageIdx: request.params.pageIdx,
-      types: request.params.types,
-      includePreservedMessages: request.params.includePreservedMessages,
-    });
-  },
-});
+};
 
-export const getConsoleMessage = definePageTool({
-  name: 'get_console_message',
-  description: `Gets a console message by its ID. You can get all messages by calling ${listConsoleMessages.name}.`,
-  annotations: {
-    category: ToolCategory.DEBUGGING,
-    readOnlyHint: true,
-  },
-  schema: {
-    msgid: zod
-      .number()
-      .describe(
-        'The msgid of a console message on the page from the listed console messages',
-      ),
-  },
-  handler: async (request, response) => {
-    response.attachConsoleMessage(request.params.msgid);
-  },
-});
+interface ConsoleMessage {
+  type: string;
+  text: string;
+}
+
+interface EvaluateResult {
+  result: unknown;
+  consoleMessages: ConsoleMessage[];
+  error?: string;
+}
+
+/**
+ * Evaluates a JavaScript expression in the page context and captures console output.
+ *
+ * @param page - Puppeteer Page instance
+ * @param expression - JavaScript expression to evaluate
+ * @param awaitPromise - Whether to await Promise results
+ * @returns Evaluation result and captured console messages
+ */
+export async function evaluateExpression(
+  page: Page,
+  expression: string,
+  awaitPromise = true
+): Promise<EvaluateResult> {
+  const consoleMessages: ConsoleMessage[] = [];
+
+  // Capture console messages during evaluation
+  const messageHandler = (msg: { type: () => string; text: () => string }) => {
+    consoleMessages.push({
+      type: msg.type(),
+      text: msg.text(),
+    });
+  };
+
+  page.on('console', messageHandler);
+
+  try {
+    const result = await page.evaluate(
+      async ({ expr, shouldAwait }: { expr: string; shouldAwait: boolean }) => {
+        try {
+          // eslint-disable-next-line no-eval
+          const value = eval(expr);
+          if (shouldAwait && value instanceof Promise) {
+            return { success: true, value: await value };
+          }
+          return { success: true, value };
+        } catch (err) {
+          return {
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
+      { expr: expression, shouldAwait: awaitPromise }
+    );
+
+    if (!result.success) {
+      return {
+        result: undefined,
+        consoleMessages,
+        error: result.error,
+      };
+    }
+
+    return {
+      result: result.value,
+      consoleMessages,
+    };
+  } catch (err) {
+    return {
+      result: undefined,
+      consoleMessages,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    page.off('console', messageHandler);
+  }
+}
+
+/**
+ * Formats the evaluation result into a human-readable string.
+ */
+export function formatEvaluateResult(result: EvaluateResult): string {
+  const parts: string[] = [];
+
+  if (result.consoleMessages.length > 0) {
+    parts.push('Console output:');
+    for (const msg of result.consoleMessages) {
+      parts.push(`  [${msg.type}] ${msg.text}`);
+    }
+  }
+
+  if (result.error) {
+    parts.push(`Error: ${result.error}`);
+  } else {
+    const serialized =
+      result.result === undefined
+        ? 'undefined'
+        : JSON.stringify(result.result, null, 2);
+    parts.push(`Result: ${serialized}`);
+  }
+
+  return parts.join('\n');
+}
