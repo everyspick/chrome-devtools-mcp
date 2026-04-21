@@ -1,85 +1,55 @@
 {
   "name": "chrome-devtools-mcp",
-  "version": "0.21.0",
-  "description": "MCP server for Chrome DevTools",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for Chrome DevTools — enables AI assistants to interact with Chrome browser via CDP",
   "type": "module",
+  "main": "dist/index.js",
   "bin": {
-    "chrome-devtools-mcp": "./build/src/bin/chrome-devtools-mcp.js",
-    "chrome-devtools": "./build/src/bin/chrome-devtools.js"
+    "chrome-devtools-mcp": "dist/index.js"
   },
-  "main": "./build/src/index.js",
   "scripts": {
-    "cli:generate": "node --experimental-strip-types scripts/generate-cli.ts",
-    "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
-    "bundle": "npm run clean && npm run build && rollup -c rollup.config.mjs && node -e \"require('fs').rmSync('build/node_modules', {recursive: true, force: true})\" && node --experimental-strip-types scripts/append-lighthouse-notices.ts",
-    "build": "tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "format": "eslint --cache --fix . && prettier --write --cache .",
-    "check-format": "eslint --cache . && prettier --check --cache .;",
-    "gen": "npm run build && npm run docs:generate && npm run cli:generate && npm run update-tool-call-metrics && npm run format",
-    "docs:generate": "node --experimental-strip-types scripts/generate-docs.ts",
-    "start": "npm run build && node build/src/index.js",
-    "start-debug": "DEBUG=mcp:* DEBUG_COLORS=false npm run build && node build/src/index.js",
-    "test": "npm run build && node scripts/test.mjs",
-    "test:no-build": "node scripts/test.mjs",
-    "test:only": "npm run build && node scripts/test.mjs --test-only",
-    "test:update-snapshots": "npm run build && node scripts/test.mjs --test-update-snapshots",
-    "prepare": "node --experimental-strip-types scripts/prepare.ts",
-    "verify-server-json-version": "node --experimental-strip-types scripts/verify-server-json-version.ts",
-    "update-lighthouse": "node --experimental-strip-types scripts/update-lighthouse.ts",
-    "update-tool-call-metrics": "node --experimental-strip-types scripts/update_tool_call_metrics.ts",
-    "verify-npm-package": "node scripts/verify-npm-package.mjs",
-    "eval": "npm run build && node --experimental-strip-types scripts/eval_gemini.ts",
-    "count-tokens": "node --experimental-strip-types scripts/count_tokens.ts"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
   },
-  "files": [
-    "build/src",
-    "LICENSE",
-    "!*.tsbuildinfo"
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "chrome",
+    "devtools",
+    "cdp",
+    "chrome-devtools-protocol",
+    "ai",
+    "browser-automation"
   ],
-  "repository": "ChromeDevTools/chrome-devtools-mcp",
-  "author": "Google LLC",
+  "author": "chrome-devtools-mcp contributors",
   "license": "Apache-2.0",
-  "bugs": {
-    "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp/issues"
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "chrome-remote-interface": "^0.33.0",
+    "zod": "^3.23.8"
   },
-  "homepage": "https://github.com/ChromeDevTools/chrome-devtools-mcp#readme",
-  "mcpName": "io.github.ChromeDevTools/chrome-devtools-mcp",
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
-    "@google/genai": "^1.37.0",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "@rollup/plugin-commonjs": "^29.0.0",
-    "@rollup/plugin-json": "^6.1.0",
-    "@rollup/plugin-node-resolve": "^16.0.3",
-    "@stylistic/eslint-plugin": "^5.4.0",
-    "@types/debug": "^4.1.12",
-    "@types/filesystem": "^0.0.36",
-    "@types/node": "^25.0.0",
-    "@types/sinon": "^21.0.0",
-    "@types/yargs": "^17.0.33",
-    "@typescript-eslint/eslint-plugin": "^8.43.0",
-    "@typescript-eslint/parser": "^8.43.0",
-    "chrome-devtools-frontend": "1.0.1613625",
-    "core-js": "3.49.0",
-    "debug": "4.4.3",
-    "eslint": "^9.35.0",
-    "eslint-import-resolver-typescript": "^4.4.4",
-    "eslint-plugin-import": "^2.32.0",
-    "globals": "^17.0.0",
-    "lighthouse": "13.1.0",
-    "prettier": "^3.6.2",
-    "puppeteer": "24.41.0",
-    "rollup": "4.60.1",
-    "rollup-plugin-cleanup": "^3.2.1",
-    "rollup-plugin-license": "^3.6.0",
-    "sinon": "^21.0.0",
-    "tiktoken": "^1.0.22",
-    "typescript": "^6.0.2",
-    "typescript-eslint": "^8.43.0",
-    "yargs": "18.0.0"
+    "@types/chrome-remote-interface": "^0.31.10",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.12.0 || >=23"
-  }
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
 }
